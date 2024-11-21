@@ -1,0 +1,668 @@
+---
+title: 'Behind the Numbers: The Hidden Risks in Homeownership'
+author: "Niyati-47943319"
+output: pdf_document
+header-includes:
+   - \usepackage{wrapfig}
+   - \usepackage{graphicx}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+Owning a home is a milestone for millions of families, representing stability, security, and an investment in the future. But behind the glossy brochures and keys to a new home lies a less glamorous reality: the risk of not being able to keep up with mortgage payments. Mortgage default, the inability to meet these payments, can quickly turn the dream of home ownership into a financial nightmare. But this isn’t just a personal problem; it’s a national issue that affects entire economies. When enough borrowers default, it ripples across banks, investors, and even the global financial market, as seen during the 2008 financial crisis.
+
+\begin{wrapfigure}{r}{0.4\textwidth} % 'l' is for left alignment, change to 'r' for right alignment
+  \vspace{-10pt} 
+  \includegraphics[width=0.4\textwidth]{download1.jpeg}
+  \vspace{-10pt} 
+\end{wrapfigure}
+
+So what causes a borrower to default on their mortgage? Is it as simple as having a low credit score, or do other factors, like debt levels, property values, and income stability, also play a role? By diving into real-world data from Fannie Mae, one of the giants of the U.S. mortgage market, this analysis uncovers the key variables that influence a borrower’s ability to stay on top of their payments. Understanding these risks isn’t just for financial experts—it's essential for lenders making smarter loan decisions, policymakers seeking economic stability, and potential homeowners who want to ensure they can truly afford their dream home.
+
+
+
+```{r,include=FALSE}
+data<-read.csv("fannie_mae.csv")
+```
+
+# Data Breakdown: Mapping Mortgage Risks
+
+The default_status variable, a key part of this analysis, is based on the FCE_DTE (Foreclosure triggered Date) field—an indicator of whether a mortgage flagged for foreclosure. If the FCE_DTE is filled, it means the borrower defaulted and the foreclosure was triggered. If it’s blank, the borrower avoided default and continued making payments.
+
+By using FCE_DTE, we can clearly distinguish between loans that ended in foreclosure and those that didn’t.FCC_DTE (the date when the foreclosure process is completed or finalized) occurs much later, after the default has already happened. It represents the end of the foreclosure process, rather than the point at which default first becomes apparent. Therefore, FCE_DTE is the more timely indicator of default. We picked some variables that might give us valuable insights into the factors that lead to mortgage defaults from the dataset.
+
+```{r,include=FALSE}
+# Create a binary response variable for default based on FCE_DTE
+data$default_status <- ifelse(!is.na(data$FCE_DTE), 1, 0)
+
+# View the distribution of the new response variable
+table(data$default_status)
+
+```
+
+* Debt-to-Income Ratio (dti): Represents the borrower's debt as a proportion of their income. Higher DTI may indicate higher default risk due to limited financial flexibility.
+
+* Loan-to-Value Ratio (oltv): The ratio of the loan amount to the property value. Usually higher LTV means less borrower equity, increasing the risk of default.
+
+* Original Interest Rate (orig_rt): The mortgage's initial interest rate. Higher rates can lead to higher monthly payments, increasing default likelihood usually.
+
+* Default Status (default_status): A binary indicator of whether the loan has defaulted (1) or not (0). This is the response variable for predicting default.
+
+* Tax Costs (TAX_COST): Represents property tax expenses. High taxes could strain finances, raising the risk of default in most cases.
+
+* Borrower Credit Score (CSCORE_B): A measure of the borrower's creditworthiness. Lower scores are typically associated with a higher risk of default.
+
+* First-Time Homebuyer (FTHB_FLG): Indicates if the borrower is a first-time homebuyer. First-timers may be more likely to default due to inexperience.
+
+* Loan Purpose (purpose): Specifies if the loan is for a purchase, refinance, or cash-out refinance. Cash-out refinances may suggest financial stress, increasing default risk.
+
+* Property Type (PROP_TYP): Describes the type of property (e.g., single-family home, condominium). Different property types carry different default risks.
+
+* Occupancy Status (occ_stat): Indicates whether the property is a primary residence, second home, or investment property. Defaults may be more likely for non-primary residences.
+
+```{r,warning=FALSE,message=FALSE,include=FALSE}
+library(dplyr)
+selected_predictors <- c("dti", "oltv", "orig_rt", "default_status", "TAX_COST", 
+                         "CSCORE_B", "FTHB_FLG", "purpose", "PROP_TYP", "occ_stat")
+# Set seed for reproducibility
+set.seed(123)
+# Randomly sample and select the predictors
+random_sample <- data %>%
+  select(all_of(selected_predictors)) %>%  # Select the relevant variables
+  sample_n(4200)
+```
+
+
+```{r,include=FALSE}
+head(random_sample)
+```
+
+```{r,include=FALSE}
+# Check for missing values in the selected predictors
+missing_values <- sapply(random_sample, function(x) sum(is.na(x)))
+missing_values
+```
+
+```{r,include=FALSE}
+# Drop 'TAX_COST' from the dataset as it has more than 50% of missing values
+random_sample <- random_sample %>%
+  select(-TAX_COST)
+```
+
+```{r,include=FALSE}
+cleaned_sample <- random_sample %>%
+  filter(!is.na(dti) & !is.na(CSCORE_B))
+```
+
+```{r,include=FALSE}
+missing_values2 <- sapply(cleaned_sample, function(x) sum(is.na(x)))
+missing_values2
+```
+
+```{r,include=FALSE}
+str(cleaned_sample)
+```
+
+```{r,include=FALSE}
+# Convert the specified variables to factors
+cleaned_sample$default_status <- as.factor(cleaned_sample$default_status)
+cleaned_sample$FTHB_FLG <- as.factor(cleaned_sample$FTHB_FLG)
+cleaned_sample$purpose <- as.factor(cleaned_sample$purpose)
+cleaned_sample$PROP_TYP <- as.factor(cleaned_sample$PROP_TYP)
+cleaned_sample$occ_stat <- as.factor(cleaned_sample$occ_stat)
+
+# Check the structure again to verify the conversion
+str(cleaned_sample)
+
+```
+
+# What Drives Mortgage Defaults?
+
+**a. Financial Pressure:**
+
+```{r}
+library(ggplot2)
+library(patchwork)
+# Create bar chart
+# Create a boxplot to visualize the relationship between dti and default_status
+p1<-ggplot(cleaned_sample, aes(x = default_status, y = dti, fill = default_status)) +
+  geom_boxplot() +
+  labs(title = "DTI vs Default Status",
+       x = "Default Status",
+       y = "Debt-to-Income Ratio (DTI)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#00AFBB", "#F8766D"), labels = c("No Default", "Default"))
+# Plot Interest Rate vs Default Status
+p2<- ggplot(cleaned_sample, aes(x = default_status, y = orig_rt, fill = default_status)) +
+  geom_boxplot() +
+  labs(title = "Interest Rate vs Default Status",
+       x = "Default Status",
+       y = "Interest Rate (%)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#00AFBB", "#F8766D"),labels = c("No Default", "Default"))
+p1+p2
+```
+
+
+1. Debt-to-interest-ratio and Default Risk: The boxplot on the left clearly shows that borrowers with higher DTIs—those who dedicate more of their income to debt payments—are more likely to default. This suggests that when borrowers are already financially stretched, even small changes in their situation can push them toward missing payments and defaulting.
+
+2. Interest Rates and Default Risk: On the right, the relationship between Interest Rates and Default Status becomes apparent. Borrowers who faced higher interest rates are more prone to default. Why? Higher interest rates mean higher monthly payments, and when combined with financial pressures or downturns, it can make it much harder for borrowers to stay on track with their mortgage payments.
+
+
+```{r,fig.width=3, fig.height=3}
+# Boxplot for Loan-to-Value Ratio (oltv) vs Default Status
+p5<- ggplot(cleaned_sample, aes(x = default_status, y = oltv, fill = default_status)) +
+  geom_boxplot() +
+  labs(title = "Loan-to-Value Ratio vs Default Status",
+       x = "Default Status",
+       y = "Loan-to-Value Ratio (LTV)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#00AFBB", "#F8766D"), labels = c("No Default", "Default"))
+p5
+```
+
+3. The relationship between a borrower's Loan-to-Value (LTV) ratio and their default risk paints an insightful picture of financial vulnerability. The boxplot highlights that borrowers with higher LTV ratios (closer to 100%) are more likely to default. Why? A higher LTV means the borrower has less equity in their home, making it harder to recover from financial shocks like job loss or unexpected expenses. Essentially, these borrowers are treading a thin line between ownership and risk.
+On the other hand, those with lower LTV ratios (closer to 70% or below) tend to avoid default. Having more equity in the property not only provides a financial buffer but also increases the homeowner's commitment to staying current with payments. When your investment in the property is higher, you’re less likely to let it go.
+This relationship between LTV and default risk suggests that equity matters—the more equity a borrower has in their home, the more financially secure they tend to be, even in tough times. Lenders should take this into account when assessing the likelihood of a borrower defaulting, especially when the LTV ratio starts to creep upwards.
+
+
+
+**b. Borrower Creditworthiness: **
+
+
+```{r,fig.width=3, fig.height=3}
+# Load necessary libraries
+library(grid)
+library(gridExtra)
+library(vcd)
+library(ggplot2)
+library(patchwork)
+# Boxplot: Credit Score vs Default Status
+p3<- ggplot(cleaned_sample, aes(x = default_status, y = CSCORE_B, fill = default_status)) +
+  geom_boxplot() +
+  labs(title = "Credit Score vs Default Status",
+       x = "Default Status",
+       y = "Credit Score") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#00AFBB", "#F8766D"), labels = c("No Default", "Default"))
+p3
+```
+
+1. *Credit Scores: The Silent Guardian of Homeownership!*
+
+Owning a home is a key part of the financial dream for many, but the path to keeping that home often involves understanding the financial risk associated with mortgages. One of the most important aspects that lenders consider is a borrower’s credit score. The boxplot on the left highlights how credit scores differ between those who defaulted and those who didn’t. Borrowers with higher credit scores tend to avoid default, while those with lower scores are more likely to fall behind on payments. Clearly, creditworthiness plays a major role in a borrower’s ability to keep up with their mortgage.
+
+
+```{r,message=FALSE,fig.width=5, fig.height=3.5}
+
+# Create a table of First-Time Homebuyer and Default Status
+mosaic_data <- table(cleaned_sample$FTHB_FLG, cleaned_sample$default_status)
+
+# Create the mosaic plot with percentages
+p4 <- grid.grabExpr(
+  mosaic(~ FTHB_FLG + default_status, data = cleaned_sample,
+         shade = TRUE,             # Automatically apply shading
+         legend = TRUE,            # Show legend
+         labeling_args = list(
+           set_varnames = list(FTHB_FLG = "First-Time Homebuyer", default_status = "Default Status"),
+           set_labels = list(FTHB_FLG = c("No", "Yes"), default_status = c("No Default", "Default")),
+           rot_labels = c(left = 90),         # Rotate the left-side labels for readability
+           gp_labels = gpar(fontsize = 10),   # Set font size for labels
+           labeling_cells = list(
+             label = "observed",   # Show observed counts
+             gp_text = gpar(fontsize = 10),  # Font size for text in the cells
+             fmt = function(x) paste0(round(100 * x / sum(x), 1), "%")  # Convert values to percentages
+           )
+         ),
+         main = "First-Time Homebuyers and Default Status",
+         xlab = "First-Time Homebuyer (Y/N)",
+         ylab = "Default Status",
+         main_gp = gpar(fontsize = 10))
+)
+# Explicitly draw the captured plot
+grid.draw(p4)
+```
+
+2. *But what about first-time homebuyers?* 
+
+Inexperience in managing homeownership costs could make them more vulnerable to default, but the plot on the right shows something interesting. While first-time homebuyers do have a slightly higher likelihood of default, the relationship isn’t as strong as you might think. In fact, the p-value in this analysis is small but still suggests that first-time homebuyer status is not a strong standalone predictor of default. Instead, it’s likely that a combination of factors, like credit score, debt-to-income ratio, and the terms of the loan, drive default risk more significantly.
+```{r,include=FALSE}
+# Recalculate proportions for each property type and default status
+prop_data <- cleaned_sample %>%
+  group_by(default_status, PROP_TYP) %>%
+  summarise(count = n()) %>%
+  mutate(proportion = count / sum(count),
+         percent_label = paste0(round(100 * proportion, 1), "%"))
+
+# Define a consistent color palette for both pie charts
+color_palette <- c("Condominium" = "#00AFBB", 
+                   "Co-Operative" = "#E7B800", 
+                   "Manufactured Home" = "#A3A500", 
+                   "Planned Urban Development" = "#F8766D", 
+                   "Single-Family Home" = "#00BF7D")
+```
+
+```{r}
+# Create pie chart for No Default (default_status = 0) with percentage labels
+p6_pie_no_default <- ggplot(filter(prop_data, default_status == 0), 
+                            aes(x = "", y = proportion, fill = recode(PROP_TYP, 
+                                "CO" = "Condominium",
+                                "CP" = "Co-Operative",
+                                "PU" = "Planned Urban Development",
+                                "MH" = "Manufactured Home",
+                                "SF" = "Single-Family Home"))) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = percent_label), position = position_stack(vjust = 0.5)) +  
+  labs(title = "No Default - Property Type",
+       fill = "Property Type") +
+  theme_void() +
+  scale_fill_manual(values = color_palette)
+ 
+```
+
+```{r}
+# Create pie chart for Default (default_status = 1) with percentage labels
+p6_pie_default <- ggplot(filter(prop_data, default_status == 1), 
+                         aes(x = "", y = proportion, fill = recode(PROP_TYP, 
+                             "CO" = "Condominium",
+                             "CP" = "Co-Operative",
+                             "PU" = "Planned Urban Development",
+                             "MH" = "Manufactured Home",
+                             "SF" = "Single-Family Home"))) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = percent_label), position = position_stack(vjust = 0.5)) +  
+  labs(title = "Default - Property Type",
+       fill = "Property Type") +
+  theme_void() +
+  scale_fill_manual(values = color_palette)
+p6_pie_default+p6_pie_no_default
+```
+
+3. When it comes to predicting mortgage defaults,*not all properties are equal* . The pie charts above tell an intriguing story about how property types impact default risk.
+
+On the right, we see the breakdown for borrowers who did not default. Here, a whopping 60.8% of these stable borrowers own single-family homes, which tend to be more personal and essential, making them less likely to default. Interestingly, 29% of non-defaulting borrowers live in planned urban developments (PUDs), showcasing that community-focused housing also maintains stability. Tiny slices, like manufactured homes and co-operatives, show up, but with almost negligible presence.
+
+Now, shifting to the left, for borrowers who did default, the pattern changes. While single-family homes still dominate at 72.9%, planned urban developments (17.6%) and manufactured homes (8.2%) contribute a larger share to the default pool than in the no-default group. This shift may reflect that owners of these types of properties might face higher financial pressures or be more likely to treat these properties as investments.
+
+The comparison between the two charts suggests that single-family homes remain relatively stable across the board, but there’s a significant uptick in defaults when it comes to planned urban developments and manufactured homes. For lenders, this is a clear indication: properties like PUDs and manufactured homes might need a closer look when assessing risk, while single-family homes continue to be a safer bet for mortgages.
+
+The type of property you invest in might just play a bigger role in your mortgage risk than you'd think.
+
+```{r}
+# Purpose vs Default Risk - Stacked Bar Plot with adjusted bar width
+p7<- ggplot(cleaned_sample, aes(x = purpose, fill = default_status)) +
+  geom_bar(position = "fill", width = 0.5) +  
+  labs(title = "Purpose of Mortgage vs Default Status",
+       x = "Purpose of Mortgage",
+       y = "Proportion",
+       fill = "Default Status") +
+  scale_fill_manual(values = c("#00AFBB", "#F8766D"), labels = c("No Default", "Default")) +
+  theme_minimal() +
+  scale_x_discrete(labels = c("C" = "Cash-Out Refinance", 
+                              "R" = "Refinance",
+                              "P" = "Purchase", 
+                              "U" = "Refinance-Not Specified")) +scale_y_continuous(limits = c(0, 1.00), breaks = seq(0,1.00, by = 0.10)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Occupancy Status vs Default Risk - Stacked Bar Plot
+p8<- ggplot(cleaned_sample, aes(x = occ_stat, fill = default_status)) +
+  geom_bar(position = "fill", width = 0.5) +
+  labs(title = "Occupancy Status vs Default Status",
+       x = "Occupancy Status",
+       y = "Proportion",
+       fill = "Default Status") +
+  scale_fill_manual(values = c("#00AFBB", "#F8766D"), labels = c("No Default", "Default")) +
+  theme_minimal() +
+  scale_x_discrete(labels = c("P" = "Principal Residence", 
+                              "S" = "Second Home",
+                              "I" = "Investor", 
+                              "U" = "Unknown"))+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p7+p8
+```
+
+4. *Is Cashing Out Worth the Risk?*
+
+The first chart delves into the purpose of the mortgage—whether it's a cash-out refinance, purchase, or standard refinance—and reveals an important insight: cash-out refinances show a slightly higher default rate. This happens when homeowners extract equity from their property, often for large expenses or consolidating debt. While it can be a useful financial tool, tapping into home equity can leave borrowers more exposed to risk, especially if unexpected financial troubles occur. It’s a stark reminder that while cashing out sounds appealing, it can sometimes come at a cost.
+
+5. *Investment Properties: A Higher Default Risk?*
+
+The second chart examines property occupancy status, whether it’s a primary residence, second home, or investment property. Unsurprisingly, people are more diligent about keeping up with mortgage payments on their primary residence. On the other hand, investment properties show a small but noticeable increase in defaults. Why? Because when financial stress hits, it’s easier for borrowers to let go of a property that’s not their home. This slight trend highlights the need for lenders to take occupancy status into account when assessing mortgage risk—it’s not just about whether borrowers can afford the payments, but also about which property they are most likely to prioritize.
+
+
+
+```{r,,include=FALSE}
+# Load necessary libraries
+library(ggplot2)
+library(reshape2)
+
+# Select only the continuous variables you want to include in the correlation analysis
+continuous_vars <- cleaned_sample %>%
+  select(dti, oltv, orig_rt, CSCORE_B)
+
+# Calculate the correlation matrix
+corr_matrix <- cor(continuous_vars, use = "complete.obs")
+corr_matrix
+```
+# Unveiling the Connections:
+
+
+```{r,fig.width=4.5, fig.height=4}
+
+# Melt the correlation matrix into a long format
+melted_corr <- melt(corr_matrix)
+
+# Plot the heatmap using ggplot2
+heatmap <- ggplot(data = melted_corr, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "#00AFBB", high = "#F8766D", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab", 
+                       name = "Correlation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(title = "Correlation Heatmap of Continuous Variables",
+       x = "Variables",
+       y = "Variables")
+
+# Display the heatmap
+heatmap
+
+```
+
+* The correlation heatmap above gives us a colorful snapshot of how different financial factors interact when it comes to mortgage risks. Think of it as a relationship map, where the deeper the color, the stronger the connection.
+For instance, the debt-to-income ratio (DTI) and the loan-to-value ratio (OLTV) have a strong positive relationship, shown by the dark red color. This means that as borrowers take on more debt relative to their income, they’re also likely to take on higher loans compared to the value of their homes—a double financial squeeze!
+On the other hand, look at the cool, calm blue between credit score (CSCORE_B) and these factors—CSCORE_B has a negative correlation with DTI and OLTV. This means that borrowers with higher credit scores tend to have lower debt burdens and smaller loan-to-value ratios, which makes them safer bets for lenders.
+In simple terms, this heatmap shows us that higher debt and larger loans often go hand in hand, while good credit can be a safety net, keeping other financial risks in check. It’s a visual reminder that the more we borrow, the more carefully we need to manage our credit and debt.
+
+
+```{r,include=FALSE}
+library(car)
+# Fit a logistic regression model (assuming default_status is your dependent variable)
+logit_model <- glm(default_status ~ FTHB_FLG + purpose + PROP_TYP + occ_stat, 
+                   data = cleaned_sample, family = binomial)
+# Check for multicollinearity using the VIF function
+vif_values <- vif(logit_model)
+# Display the VIF values
+vif_values
+```
+
+* In assessing the relationship between factors that might influence mortgage default risk, we tested whether different categorical variables are providing similar or redundant information. For example, we examined if being a first-time home-buyer, the purpose of the loan, the property type, and the occupancy status of the home are offering distinct or overlapping insights into a borrower's likelihood of default.
+The analysis found that each of these factors provides unique information. The results suggest that none of the variables are highly dependent on one another, meaning that including them together in the model helps paint a clearer picture of the overall risk. In simpler terms, this means that all these factors contribute something valuable to our understanding of mortgage default risk.
+
+## Summary of Key Categorical Variables Related to Mortgage Default Risk
+
+In this analysis, we summarized the key categorical variables that may influence the likelihood of a borrower defaulting on their mortgage. These frequency tables provide insights into the distribution of these variables within the dataset, helping to identify potential patterns and associations.
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(tibble)
+library(knitr)
+library(kableExtra)
+
+# Create frequency table for 'purpose'
+purpose_freq <- cleaned_sample %>%
+  count(purpose) %>%
+  arrange(desc(n))
+
+# Convert to tibble and display the table using kable with caption
+purpose_freq_tibble <- as_tibble(purpose_freq)
+purpose_freq_tibble %>%
+  kable(col.names = c("Loan Purpose", "Frequency"), caption = "Frequency Table for Loan Purpose") %>%
+  kable_styling(full_width = FALSE)
+```
+
+Table 1: Loan Purpose Distribution
+This table shows the frequency of different loan purposes, including purchases (P), refinances (R), and cash-out refinances (C). The distribution of loan purposes can indicate different levels of financial risk, with cash-out refinances often associated with higher default rates.
+
+
+```{r}
+# Create frequency table for 'FTHB_FLG'
+FTHB_FLG_freq <- cleaned_sample %>%
+  count(FTHB_FLG) %>%
+  arrange(desc(n))
+
+# Convert to tibble and display the table using kable with caption
+FTHB_FLG_freq_tibble <- as_tibble(FTHB_FLG_freq)
+FTHB_FLG_freq_tibble %>%
+  kable(col.names = c("First-Time Homebuyer Status", "Frequency"), caption = "Frequency Table for First-Time Homebuyer Status") %>%
+  kable_styling(full_width = FALSE)
+```
+Table 2: First-Time Homebuyer Status
+This table summarizes whether the borrower was a first-time homebuyer (Y for Yes, N for No). Understanding whether a borrower is purchasing their first home can offer insight into their financial stability, as first-time homebuyers may face unique challenges.
+
+
+```{r}
+# Create frequency table for 'PROP_TYP'
+PROP_TYP_freq <- cleaned_sample %>%
+  count(PROP_TYP) %>%
+  arrange(desc(n))
+
+# Convert to tibble and display the table using kable with caption
+PROP_TYP_freq_tibble <- as_tibble(PROP_TYP_freq)
+PROP_TYP_freq_tibble %>%
+  kable(col.names = c("Property Type", "Frequency"), caption = "Frequency Table for Property Type") %>%
+  kable_styling(full_width = FALSE)
+```
+
+Table 3: Property Type Distribution
+Here, we see the distribution of different types of properties, such as single-family homes (SF), planned urban developments (PU), and others. Some property types had relatively few observations, so to ensure more meaningful analysis, we combined categories like Manufactured Homes (MH) and Co-operatives (CP) into a single "Other" category.
+
+
+```{r}
+# Create frequency table for 'occ_stat'
+occ_stat_freq <- cleaned_sample %>%
+  count(occ_stat) %>%
+  arrange(desc(n))
+
+# Convert to tibble and display the table using kable with caption
+occ_stat_freq_tibble <- as_tibble(occ_stat_freq)
+occ_stat_freq_tibble %>%
+  kable(col.names = c("Occupancy Status", "Frequency"), caption = "Frequency Table for Occupancy Status") %>%
+  kable_styling(full_width = FALSE)
+```
+
+Table 4: Occupancy Status
+This table reflects whether the property is a principal residence (P), an investment property (I), or a second home (S). Occupancy status plays a critical role in predicting default risk, as borrowers are more likely to prioritize payments on their primary residence.
+
+```{r,include=FALSE}
+# Relevel First-Time Homebuyer Status to make "Y" the reference category
+cleaned_sample$FTHB_FLG <- relevel(cleaned_sample$FTHB_FLG, ref = "Y")
+
+# Combine low-frequency categories into "Other" for Property Type using case_when()
+cleaned_sample <- cleaned_sample %>%
+  mutate(PROP_TYP = case_when(
+    PROP_TYP %in% c("MH", "CP") ~ "Other",
+    TRUE ~ PROP_TYP
+  ))
+
+# Convert PROP_TYP to a factor before using relevel
+cleaned_sample$PROP_TYP <- factor(cleaned_sample$PROP_TYP)
+
+# Relevel PROP_TYP with "SF" as the reference category
+cleaned_sample$PROP_TYP <- relevel(cleaned_sample$PROP_TYP, ref = "SF")
+
+# Relevel Loan Purpose to make "P" (Purchase) the reference category
+cleaned_sample$purpose <- factor(cleaned_sample$purpose)
+cleaned_sample$purpose <- relevel(cleaned_sample$purpose, ref = "P")
+
+# Relevel Occupancy Status to make "P" the reference category
+cleaned_sample$occ_stat <- factor(cleaned_sample$occ_stat)
+cleaned_sample$occ_stat <- relevel(cleaned_sample$occ_stat, ref = "P")
+
+```
+
+# Assessing Predictors of Mortgage Default Risk
+
+```{r,include=FALSE}
+# Full logistic regression model with all predictors
+full_model <- glm(default_status ~ dti + oltv + orig_rt + FTHB_FLG + purpose + PROP_TYP + occ_stat, 
+                  data = cleaned_sample, family = binomial)
+
+# Summary of the full model
+summary(full_model)
+anova(full_model)
+```
+
+In our initial analysis, we explored a variety of factors that could influence whether a borrower might default on their mortgage. We looked at things like how much of their income is already going toward debt, how high their interest rates are, whether they’re a first-time homebuyer, and even what type of property they own.
+
+What we found was that not all of these factors carried the same weight. Debt-to-income ratio (DTI), for example, stood out as a major red flag.If a borrower has a DTI of 35%, and it rises to 36%, their risk of default increases by 5.4%.  Similarly, higher interest rates also spelled trouble, as borrowers with steeper monthly payments face greater difficulty in keeping up.For each 1% increase in the interest rate, the odds of default increase by approximately 179.1%.
+
+Even borrowers who take out a cash-out refinance loan are 113.5% more likely to default compared to those who take out a loan for purchasing a home. This means cash-out refinances—where borrowers take equity out of their home—carry a much higher risk of default. Borrowers opting for these loans often increase their overall debt, leaving them in a more vulnerable financial position.
+
+Borrowers living in Planned Urban Developments (PUDs) are 47.6% less likely to default compared to those in single-family homes. This suggests that living in planned communities, which often have more structured housing or community services, might provide a degree of financial stability or attract more financially stable homeowners.
+
+On the other hand, some factors we initially thought might matter, like how much of the property’s value is borrowed (loan-to-value ratio) or whether someone is a first-time homebuyer, didn’t have as strong an effect as expected. These factors are still part of the picture, but they didn’t seem to predict default risk as clearly as we anticipated.
+
+This initial model gave us a well-rounded view, helping us see which factors truly drive mortgage default risk and which ones might play a smaller role.But a further analysis was needed to findout which all factors actually matters to predict the risk.
+
+
+```{r,include=FALSE}
+
+# Null model (intercept only)
+null_model <- glm(default_status ~ 1, data = cleaned_sample, family = binomial)
+
+# Forward selection using AIC
+library(MASS)
+selected_model <- stepAIC(null_model, 
+                          scope = list(lower = null_model, upper = full_model), 
+                          direction = "forward")
+# Summary of the selected model
+summary(selected_model)
+```
+
+# The Factors That Drive Mortgage Defaults: What Really Matters
+
+When it comes to understanding why some homeowners default on their mortgages, not all factors carry the same weight. In our latest analysis, we've pinpointed the most important contributors to mortgage defaults, and the findings reveal some fascinating insights.
+
+*High Interest Rates: The Silent Killer*
+
+One of the strongest predictors of default risk is the interest rate on the mortgage. For every 1% increase in the interest rate, a borrower’s chances of defaulting almost triples. Imagine a homeowner with a 3% interest rate on their mortgage—if that rate jumps to 4%, the odds of default skyrocket by three times. This suggests that even a small hike in interest rates can have a significant impact on a family’s financial stability, especially when monthly payments become more difficult to manage.
+
+*Debt-to-Income Ratio: A Growing Burden*
+
+Another powerful indicator of default risk is a borrower’s debt-to-income ratio (DTI). Borrowers with high debt compared to their income are much more likely to default. For every point their DTI increases, the odds of default rise by around 5%. While that may not sound like much on its own, when combined with other financial pressures—like unexpected expenses or rising interest rates—this can push homeowners into dangerous territory. It’s a clear reminder that taking on too much debt can make even the most diligent borrower vulnerable to falling behind on payments.
+
+*The Risk of Cash-Out Refinances*
+
+Homeowners who use cash-out refinances are more than twice as likely to default compared to those who take out traditional home purchase loans. Cash-out refinances allow borrowers to tap into their home equity for extra cash, but it comes at a cost—adding more debt to the pile. While this can be tempting for renovations or paying off other debts, it often leaves borrowers in a more precarious position, especially if their financial situation takes a turn for the worse.
+
+*First-Time Homebuyers: Surprisingly Resilient*
+
+Despite the challenges often associated with first-time homebuyers, they are actually 48% less likely to default compared to experienced homeowners. This might seem surprising at first, but it makes sense when you think about it. For many, buying a home is a major life achievement, and they are more motivated to keep up with their payments, even when things get tough. The emotional and financial investment in their first home likely pushes them to prioritize their mortgage payments over other obligations.
+
+```{r,include=FALSE}
+# Including interaction terms between DTI and Interest Rate, and Loan Purpose with Occupancy Status
+interaction_model <- glm(default_status ~ orig_rt * dti + purpose * occ_stat + FTHB_FLG, 
+                         data = cleaned_sample, family = binomial)
+
+# Summary of the model with interaction terms
+summary(interaction_model)
+
+```
+
+```{r,include=FALSE}
+library(DHARMa)
+library(tibble)
+library(dplyr)
+res_model.final <- simulateResiduals(fittedModel = selected_model)
+q_model.final <- residuals(res_model.final, quantileFunction = qnorm)
+g16 <- ggplot(tibble(q = q_model.final), aes(x = q)) +
+geom_histogram(aes(y = after_stat(density)), bins = 6) +
+geom_density()
+g17 <- ggplot(tibble(q = q_model.final), aes(sample = q)) +geom_qq() +
+geom_qq_line()
+g16 + g17
+```
+```{r,include=FALSE}
+plot(res_model.final)
+```
+
+```{r,include=FALSE}
+# Generate predicted probabilities from the model
+probs.final <- fitted(selected_model)
+
+# Create a confusion matrix based on a threshold of 0.5
+# If probs.final >= 0.5, it is classified as a default (1), otherwise as no default (0)
+confusion_matrix <- table(cleaned_sample$default_status, probs.final >= 0.5)
+
+# Display the confusion matrix
+print(confusion_matrix)
+
+```
+
+# Predicting Mortgage Defaults: Did Our Model Get It Right?
+
+```{r}
+# Create confusion matrix
+confusion_matrix_prior <- table(cleaned_sample$default_status, probs.final >= 85/4198)
+
+# Rename row and column names
+rownames(confusion_matrix_prior) <- c("Actual No Default", "Actual Default")
+colnames(confusion_matrix_prior) <- c("Predicted No Default", "Predicted Default")
+
+# Display the relabeled confusion matrix using knitr::kable
+knitr::kable(confusion_matrix_prior, caption = "Confusion Matrix for Predicted vs Actual Defaults")
+
+```
+
+```{r,include=FALSE}
+# Extract values from the confusion matrix
+TP <- 58
+FN <- 27
+TN <- 2683
+FP <- 1430
+
+# Calculate Sensitivity
+sensitivity <- TP / (TP + FN)
+sensitivity_percent <- sensitivity * 100
+
+# Calculate Specificity
+specificity <- TN / (TN + FP)
+specificity_percent <- specificity * 100
+
+# Print results
+cat("Sensitivity:", round(sensitivity_percent, 2), "%\n")
+cat("Specificity:", round(specificity_percent, 2), "%\n")
+
+```
+
+When it comes to predicting mortgage defaults, our model shows promising results. Imagine you're a lender trying to identify which borrowers are likely to default on their loans. You want to catch as many potential defaults as possible without mistakenly flagging too many reliable borrowers.
+
+Our model does a solid job of spotting those who will default, catching around 68% of all the borrowers who are likely to fall behind on payments. However, it's not perfect: some borrowers slip through the cracks and aren't identified as risks, even though they might default.On the flip side, the model is right about 65% of the time when it predicts that borrowers will stay on top of their payments. This means that most of the time, it can correctly identify those who are unlikely to default, but there's still room for improvement when it comes to reducing false alarms.
+
+The model strikes a good balance, helping lenders spot potential risks while still giving a fair chance to those who are likely to meet their mortgage obligations.
+
+```{r,include=FALSE}
+# Load necessary libraries
+library(broom)
+library(pROC)
+
+# Augment the model with predicted probabilities
+augment_selected_model <- broom::augment(selected_model, type.predict = "response")
+
+# Calculate the ROC curve using the predicted probabilities
+roc_curve <- roc(cleaned_sample$default_status, augment_selected_model$.fitted)
+
+# Calculate the AUC (Area Under the Curve)
+auc_value <- roc_curve$auc
+
+# Plot the ROC curve
+roc_plot <- plot(roc_curve, main = "ROC Curve for Logistic Model", col = "blue")
+
+# Add the AUC value to the plot
+text(x = 0.6, y = 0.2, labels = paste("AUC =", round(auc_value, 3)), col = "red")
+
+
+```
+
+# Cracking the Code of Mortgage Default Risk—What Homeowners and Lenders Should Know
+
+At first glance, paying off a mortgage may seem straightforward: make your payments on time, and you'll be fine. But as we’ve uncovered, the reality is far more complex. High interest rates, debt burdens, and the temptation of cash-out refinances can quietly increase the risk of default, even for the most well-intentioned homeowners. And while first-time homebuyers are often viewed as risky, they’ve proven more resilient than expected, defying the odds in surprising ways.
+
+For lenders, understanding these nuances is critical. The findings suggest a shift in focus—from simply evaluating credit scores to considering the full picture of a borrower's financial health and the type of property they're investing in. For homeowners, it’s a reminder that small financial decisions today can have a big impact on your future stability.
+
+Looking ahead, these insights offer a roadmap to not just avoid defaults, but to make smarter, more informed decisions—whether you're taking out a loan, refinancing, or just planning for the future. Although,the analysis relies on historical data from Fannie Mae, which may not capture emerging market trends or shifts in borrower behavior in the post-COVID economy.Therefore,it’s more about being proactive, not reactive, in navigating the tricky world of homeownership.
