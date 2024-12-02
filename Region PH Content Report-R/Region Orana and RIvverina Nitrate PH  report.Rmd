@@ -1,0 +1,357 @@
+---
+title: "Statistical Report Nitrate-Ph-Permeability Of Region Orana And Riverina"
+author: "Niyati"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## INTRODUCTION
+
+The following statistical report analyzes a simulated dataset containing
+data on 247 samples from the ORAN and RIVERINA regions. The dataset
+contains variables like Subject ID, region, pH level, nitrate
+content and permeability. The main objectives of this analysis are to answer the following questions: 
+\vspace{0.5cm}
+1. Is there any difference in the
+average nitrate of Orana and Riverina specimens?
+\vspace{0.5cm}
+2. What is the relation
+between the pH of specimens and the permeability?
+
+
+## ORANA AND RIVERINA DATASET
+
+```{r, echo=FALSE}
+library(knitr)
+dataset <- read.csv("47943319_data_StatReport.csv")
+head_dataset <- head(dataset, 7)
+kable(head_dataset, format = "markdown")
+
+```
+
+**1) To check is there any difference in the average nitrate of Orana and
+riverina specimens we have to perform two-sample t-test with assuming
+equal variance as their both the samples have different no. of
+observations.**
+
+```{r,echo=FALSE, warning=FALSE}
+# Read the CSV file
+tdataset <- read.csv("nitrate_content.csv")
+head_tdataset <- head(tdataset, 7)
+kable(head_tdataset, format = "markdown")
+# Extract the 'Orana' and 'Riverina' columns
+Orana <- tdataset$Orana
+Riverina <- tdataset$Riverina
+
+```
+
+```{r, echo=FALSE,warning=FALSE,fig.height=5,fig.align='center',results='asis'}
+# Load the ggplot2 library
+library(ggplot2)
+
+# Create a boxplot
+boxplot_data <- data.frame(Value = c(Orana, Riverina),
+  Region = factor(rep(c("Orana", "Riverina"), c(length(Orana), length(Riverina)))))
+
+# Create the boxplot
+ggplot(boxplot_data, aes(x = Region, y = Value, fill = Region)) +
+  geom_boxplot() +
+  labs(x = "Region", y = "Nitrate content") +
+  theme_minimal()
+cat("Fig1.Box Plot Comparison of Regions.")
+```
+
+<br> <br>
+
+Box Plot visualise that mean and spread of both region are almost same though we can assume to be equal to check the t stat value and moreover,Orana contains some outliers too that may effect some of statistical analysis.
+
+<br> <br>
+
+
+
+
+<br> <br>
+
+\vspace{1cm}
+
+## Statistical Analysis
+<br> <br>
+
+$H_{0}$ :$\mu_1=\mu_2$
+
+$H_{1}$ :$\mu_1\neq\mu_2$
+
+<br> <br> <br>
+\vspace{1cm}
+
+```{r, echo=FALSE,warning=FALSE,results='asis'}
+t_test_result <- t.test(Orana,Riverina,var.equal = TRUE)
+print(t_test_result)
+
+```
+
+\vspace{1cm}
+<br> <br>
+
+```{r,echo=FALSE,warning=FALSE,fig.height=4.5,fig.align='center',results='asis'}
+# Extract the t-stats,degree of freedom and p-value from the t-test result
+t_statistic <- t_test_result$statistic
+dof <- t_test_result$parameter
+p_value <- t_test_result$p.value
+
+# Calculate alpha from the p-value
+alpha <- 1 - p_value
+
+# Calculate the degrees of freedom
+dof <- t_test_result$parameter
+
+# Calculate the critical values
+critical_value <- qt(1 - alpha/2, dof)
+
+# Create a sequence of x values
+x <- seq(-4, 4, length = 100)
+
+# Create the normal distribution curve
+y <- dt(x, dof)
+
+# Create a data frame for the plot
+df_plot <- data.frame(x = x, y = y)
+
+# Load the ggplot2 library
+library(ggplot2)
+
+# Create the plot
+ggplot(df_plot, aes(x = x, y = y)) +
+  geom_line(color = "blue", size = 1) +
+  geom_ribbon(data = subset(df_plot, x > critical_value | x < -critical_value),
+              aes(ymax = y), ymin = 0, fill = "skyblue", alpha = 0.5) +
+  geom_vline(xintercept = c(-critical_value, critical_value), linetype = "dashed") +
+  geom_vline(xintercept = t_statistic, color = "red", linetype = "dotted") +
+  labs(x = "t-value", y = "Density") +
+  theme_minimal()
+cat("\n", "Fig2.t-test distribution of region", "\n")
+```
+\vspace{1cm}
+
+<br> <br> <br>
+
+T-Stat value is -0.19351 and p-value is 0.8467 which is greater than
+\>0.05 therefore we will donot reject $H_{o}$ and conclude that their is
+insufficent evidence for difference in the average nitrate of
+Orana and Riverina specimens.
+
+\vspace{1cm}
+
+
+```{r,echo=FALSE,warning=FALSE,results='asis'}
+# Extract the confidence interval from the t-test result
+conf_interval <- t_test_result$conf.int
+
+# Print the confidence interval
+cat("95% confidence interval is :","(",conf_interval,")")
+```
+\vspace{1cm}
+
+The values -0.4231283 and 0.3474273 represent the lower and upper
+bounds, respectively, of the 95% confidence interval for a particular
+statistic. That ensures that the true value of the parameters lie
+between this interval and we are 95% sure about this.
+
+<br>
+<br>
+
+
+\newpage
+
+
+**2)To check the relation between the pH of specimens and the
+permeability we will conduct a simple linear regression**
+
+\vspace{1cm}
+
+*Simple Linear Regression*
+
+```{r, echo=FALSE}
+lmph=lm(pH~permeability,data=dataset)
+summary(lmph)
+```
+\vspace{0.2cm}
+
+**Coefficient Interpretation**: The Intercept (1.888849) is an estimate of the pH value at the point where the permeability reaches 0. In practice, this may not be directly physical, especially if the data cannot be zero. The Permeability Coefficient (0.054647) indicates that for each unit increase in the permeability value, the pH value increases by 0.05457 units, assuming that all other variables are constant.
+
+<br>
+$pH = 1.888849 + 0.054647 \times \text{permeability}$
+<br>
+
+ \vspace{0.5cm}
+```{r,echo=FALSE,warning=FALSE,fig.height=3}
+## Create a histogram of the residuals
+residuals <- resid(lmph)
+hist(residuals, xlab = "Residuals", ylab = "Frequency", col = "lightblue", border = "black")
+cat("Fig3.Histogram of Residuals")
+```
+```{r,echo=FALSE,warning=FALSE}
+plot(lmph$fitted.values, residuals, 
+     xlab = "Fitted values", ylab = "Residuals",
+     pch = 19, col = "blue")
+abline(h = 0, col = "red")  # Add a horizontal line at y = 0 for reference
+cat("Fig4. Residual plot")
+```
+\vspace{1cm}
+**Goodness of fit**:This study found that the linear relationship between pH values and permeability was responsible for approximately 82.19 percent of the variance in pH values. This indicates that the model is reasonably well-fitted to the data.Additionally, the adjusted RSQ (0.8212) was close to the multiple RSquare, indicating that the model was not oversimplifying the data.
+
+\vspace{1cm}
+
+
+**Residual Standard Error**:The residual standard error (RSD) of the study was 0.4076, indicating the average amount of deviation from the predicted values of the model.
+
+\newpage
+
+## CONCLUSION 
+\vspace{1.5cm}
+1)  Based on statistical analysis, the results do not support a statistically significant difference in average nitrate concentration between the ORAN and RIVERINA samples.
+
+\vspace{0.5cm}
+Therefore, we do not accept the null hypothesis and conclude there is not enough evidence to support a meaningful difference in nitrate concentration between these two regions. 
+\vspace{0.5cm}
+
+It is important to note the limitations of this study, including the size of the sample and any possible confounders that may have affected the results. A larger and more varied sample size, as well as an investigation of additional variables, may provide a better understanding of nitrate content differences between the ORANA and RIVERINA regions.
+\vspace{0.5cm}
+This research adds to the existing evidence base and emphasizes the necessity of ongoing research and surveillance of nitrate concentrations in various geographical areas in order to ensure successful environmental management and agricultural operations.
+
+\vspace{0.5cm}
+2)  The statistical analysis conducted revealed a strong positive linear relationship between the pH levels of the samples and the permeability of the water. 
+\vspace{0.5cm}
+
+It can be concluded that pH plays a major role in the permeability of samples, thus emphasizing the significance of monitoring and comprehending these relationships for the successful management of the environment and agricultural practices. 
+\vspace{0.5cm}
+
+Nevertheless, it is important to be aware of any limitations, such as the size of the sample or other variables, that may limit the applicability of the findings. Further investigation with a larger and varied sample could provide further insight into this fundamental ecological relationship.
+\vspace{0.5cm}
+\newpage
+
+## Appendix
+
+
+**ASSUMPTION IN FIRST TEST AND NORMALITY CHECK**
+
+1.  Both samples have equal spread $\sigma_1=\sigma_2$ <br> <br>
+
+**To check normality**
+
+
+```{r,echo=FALSE,warning=FALSE,fig.height=3.85,results='asis',fig.align='left'}
+# Create a new graphics window with one row and two columns
+par(mfrow = c(1, 2))
+
+# Histogram for 'Orana' with customized size
+hist(Orana, breaks = "FD", col = "lightblue", border = "black", xlab = "Nitrate Content", cex.main = 0.8)
+
+# Histogram for 'Riverina' with customized size
+hist(Riverina, breaks = "FD", col = "skyblue", border = "black", xlab = "Nitrate Content", cex.main = 0.8)
+cat(">Fig a.1.Normality check of Orana and Riverna")
+
+```
+
+
+
+Above histogram depicts that the specimen collected from Orana and
+Riverina region are**normally distributed** in terms of nitrate
+content.Hence two sample t-test conditions are being satisfied
+
+
+\vspace{0.75cm}
+
+**FORMULA AND METHOD OF T-TEST**
+
+The results of the two-sample t-test are as follows:
+
+$H_0: \mu_1 = \mu_2$
+
+$H_1: \mu_1 \neq \mu_2$
+
+ \[ t = \frac{{\bar{X}_1 - \bar{X}_2}}{\sqrt{\frac{s_1^2}{n_1} + \frac{s_2^2}{n_2}}} \]
+
+1. $\bar{X}_1$ and $\bar{X}_2$ represent the sample means of the two groups,
+2. $s_1$ and $s_2$ are the sample standard deviations of the two groups,
+3. $n_1$ and $n_2$ are the sizes of the two groups.
+
+The null hypothesis is rejected if the $p$-value is less than the chosen significance level, typically 0.05.
+
+\newpage
+
+**CORRELATION OF FEATURES INFLUENCING SIMPLE LINEAR REGRESSION**
+
+
+```{r,echo=FALSE,results='asis'}
+# Perform the correlation analysis
+correlation <- cor(dataset$pH, dataset$permeability)
+cat("Correlation between pH of the region and permeability is : ", correlation, "\n")
+
+data_orana <- subset(dataset, region == "Orana")
+data_riverina <- subset(dataset, region == "Riverina")
+
+# Calculate correlation for each region
+correlation_orana <- cor(data_orana$pH, data_orana$permeability)
+correlation_riverina <- cor(data_riverina$pH, data_riverina$permeability)
+
+# Print the correlations
+cat("Correlation in Orana of pH and permeability: ", correlation_orana)
+cat("Correlation in Riverina of pH and permeability: ", correlation_riverina)
+
+
+```
+
+
+
+A correlation coefficient (CoR) of 0.906603 shows a positive linear
+correlation between pH levels and sample permeability. This indicates
+that the higher the pH, the higher the permeability, and vice-versa.
+
+<br> <br>
+
+When examining the correlations between the two regions on their own, it
+is clear that the Orana region and Riverina region demonstrate a strong
+positive correlation between the pH level and the permeability level.
+The correlation coefficient for the Orana region is estimated to be
+0.734862, while the correlation coefficient for Riverina is slightly
+higher at 0.8093329. This indicates that the pH-permeability
+relationship is consistent across both regions, suggesting a similar
+pattern across both geographic areas.
+
+
+\vspace{0.75cm}
+<br> <br>
+
+```{r,echo=FALSE,warning=FALSE,results='asis',fig.align='center',fig.height=4.7}
+
+
+# Create a scatter plot
+ggplot(dataset, aes(x = pH, y = permeability, color = region)) +
+  geom_point() +
+  labs(x = "pH", y = "Permeability") +
+  theme_minimal() 
+cat("Fig a.2.Scatter Plot of pH vs. Permeability")
+```
+
+\vspace{4cm}
+
+
+**FORMULA AND METHOD OF SIMPLE LINEAR REGRESSION**
+The simple linear regression model can be represented as:
+
+\[y = \beta_0 + \beta_1 x + \varepsilon\]
+
+where:
+
+- \(y\) is the dependent variable,
+- \(x\) is the independent variable,
+- \(\beta_0\) is the intercept,
+- \(\beta_1\) is the coefficient for the independent variable
+- \(\varepsilon\) is the error term.
