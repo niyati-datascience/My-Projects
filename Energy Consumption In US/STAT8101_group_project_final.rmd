@@ -1,0 +1,770 @@
+---
+title: "EDA"
+author: "STAT8101 Group Project"
+date: "2024-10-23"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE,warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, results='hide', warning=FALSE, message=FALSE, eval=FALSE)
+```
+
+```{r,warning=FALSE,message=FALSE}
+# Load necessary libraries
+library(dplyr)
+library(tidyr)
+library(VIM)
+library(gridExtra)
+library(kableExtra)
+library(tidyverse) 
+library(GGally) 
+library(ggplot2) 
+library(car) 
+library(DHARMa) 
+library(MASS) 
+library(janitor)
+library(survey) # applying survey design, handling weights
+library(readr)
+library(broom)
+```
+
+```{r}
+# Import your dataset
+data <- read.csv("cbecs2018_final_public.csv")
+
+data_desc <- data.frame(
+  Variable = c("ELCNS", "CENDIV", "REGION", "SQFT", "FINALWT"),
+  Description = c("The total electricity consumed by the building, measured in kWh",
+                  "Census division classification - 1=New England; 2=Middle Atlantic; 3=East North Central; 4=West North Central; 5=South Atlantic; 6=East South Central; 7=West South Central; 8=Mountain; 9=Pacific", 
+                  "The geographic region where the building is located - 1=Northeast; 2=Midwest; 3=South; 4=West", 
+                  "The total area of the building, measured in square feet", 
+                  "Nonresponse Adjusted Weight")
+)
+
+knitr::kable( data_desc[1:5, 1:2], digits = 3,
+              booktabs = TRUE, format = 'latex',
+              position = "h!", caption = "Data Description" ) %>%
+  kableExtra::kable_styling( position = "center") %>%
+  column_spec(1, "1in") %>%
+  column_spec(2, "5in") 
+```
+
+```{r}
+# Select relevant columns
+selected_columns <- c(
+    "ELCNS", "SQFT", "REGION", "CENDIV" ,"FINALWT"
+)
+extracted_data <- data %>% dplyr::select(all_of(selected_columns))
+```
+
+```{r}
+# Convert categorical variables to factors
+extracted_data <- extracted_data %>%
+  mutate(
+    REGION = as.factor(REGION),
+    CENDIV = as.factor(CENDIV),
+  )
+
+extracted_data <- extracted_data %>%
+  mutate(REGION = ifelse(REGION == 1, "Northeast", REGION),
+         REGION = ifelse(REGION == 2, "Midwest", REGION),
+         REGION = ifelse(REGION == 3, "South", REGION),
+         REGION = ifelse(REGION == 4, "West", REGION))
+
+extracted_data <- extracted_data %>%
+  mutate(CENDIV = ifelse(CENDIV == 1, "New England", CENDIV),
+         CENDIV = ifelse(CENDIV == 2, "Middle Atlantic", CENDIV),
+         CENDIV = ifelse(CENDIV == 3, "East North Central", CENDIV),
+         CENDIV = ifelse(CENDIV == 4, "West North Central", CENDIV),
+         CENDIV = ifelse(CENDIV == 5, "South Atlantic", CENDIV),
+         CENDIV = ifelse(CENDIV == 6, "East South Atlantic", CENDIV),
+         CENDIV = ifelse(CENDIV == 7, "West South Atlantic", CENDIV),
+         CENDIV = ifelse(CENDIV == 8, "Mountain", CENDIV),
+         CENDIV = ifelse(CENDIV == 9, "Pacific", CENDIV)
+  )
+
+head(extracted_data, 10)
+
+```
+
+```{r, fig.width=7, fig.height=3}
+extracted_data <- extracted_data %>%
+  mutate(ELCNS_scaled = ELCNS/1000000)
+
+extracted_data <- extracted_data %>%
+  mutate(SQFT_scaled = SQFT/1000)
+
+head(extracted_data, 10)
+
+g1 = extracted_data |> ggplot(aes(x = ELCNS_scaled)) +
+  geom_histogram(bins=50,
+                 color = '#73c6b6', fill = '#f8c471') + 
+  #scale_color_grey()+scale_fill_grey() +
+  labs(title = "Original ELCNS (in millions)") + 
+  theme_classic()
+
+extracted_data <- extracted_data %>%
+  mutate(log_ELCNS = log(ELCNS)) 
+
+g2 = extracted_data |> ggplot(aes(x = log_ELCNS)) +
+  geom_histogram(bins=50,
+                 color = 'white', fill = '#73c6b6') + 
+  labs(title = "Log-Transformed ELCNS") + 
+  theme_classic()
+
+grid.arrange(g1, g2, ncol=2)
+
+g3 = extracted_data |> ggplot(aes(x = SQFT_scaled)) +
+  geom_histogram(bins=100,
+                 color = '#73c6b6', fill = '#f8c471') + 
+  #scale_color_grey()+scale_fill_grey() +
+  labs(title = "Original SQFT (in thousands)") + 
+  theme_classic()
+
+extracted_data <- extracted_data %>%
+  mutate(log_SQFT = log(SQFT)) 
+
+g4 = extracted_data |> ggplot(aes(x = log_SQFT)) +
+  geom_histogram(bins=50,
+                 color = 'white', fill = '#73c6b6') + 
+  labs(title = "Log-Transformed SQFT") + 
+  theme_classic()
+
+
+grid.arrange(g3, g4, ncol=2)
+
+extracted_data |> ggpairs(extracted_data, columns=c('log_ELCNS', 'log_SQFT')) + 
+  theme_minimal()
+
+```
+
+```{r}
+# Group-wise median imputation based on CENDIV
+imputed_data <- extracted_data %>%
+  group_by(CENDIV) %>%
+  mutate(ELCNS = ifelse(is.na(ELCNS), median(ELCNS, na.rm = TRUE), ELCNS))
+
+# Check if missing values have been imputed
+sum(is.na(imputed_data$ELCNS))
+```
+
+```{r}
+head(imputed_data)
+```
+
+### 5. Nonresponse Adjustments
+
+FINALWT (Nonresponse Adjusted Weight) is specifically designed to adjust for nonresponse bias. 
+
+```{r}
+# Use imputed_data and apply log transformation to ELCNS and SQFT
+transformed_data <- imputed_data %>%
+  mutate(log_ELCNS = log(ELCNS + 1),  # Log transformation of ELCNS
+         log_SQFT = log(SQFT + 1))    # Log transformation of SQFT
+```
+
+```{r}
+str(transformed_data)
+```
+
+```{r}
+# Define the survey design with clustering and weights
+svy_design <- svydesign(ids = ~REGION + CENDIV, 
+                        data = transformed_data, 
+                        weights = ~FINALWT)
+```
+
+```{r}
+# 1. Weighted Distribution Graph for log_ELCNS
+svyhist(~log_ELCNS, design = svy_design, 
+        main = "Weighted Distribution of log(ELCNS)", col = "blue")
+
+
+# 1. Weighted Distribution Graph for log_SQFT
+svyhist(~log_SQFT, design = svy_design, 
+        main = "Weighted Distribution of log(SQFT)", col = "green")
+```
+
+```{r}
+# 2. Weighted Correlation between log_ELCNS and log_SQFT
+# Weighted means of log_ELCNS and log_SQFT
+weighted_mean_log_ELCNS <- svymean(~log_ELCNS, svy_design)
+weighted_mean_log_SQFT <- svymean(~log_SQFT, svy_design)
+
+# Weighted variances of log_ELCNS and log_SQFT
+weighted_var_log_ELCNS <- svyvar(~log_ELCNS, svy_design)
+weighted_var_log_SQFT <- svyvar(~log_SQFT, svy_design)
+
+# Weighted covariance between log_ELCNS and log_SQFT
+cov_log_ELCNS_SQFT <- svyvar(~log_ELCNS + log_SQFT, svy_design)[1, 2]
+
+# Calculate weighted correlation
+weighted_correlation <- cov_log_ELCNS_SQFT / (sqrt(weighted_var_log_ELCNS) * sqrt(weighted_var_log_SQFT))
+
+# Print the weighted correlation
+print(weighted_correlation)
+
+cat("Weighted mean log_ELCNS:", weighted_mean_log_ELCNS, "\n")
+cat("Weighted variance log_ELCNS:", weighted_var_log_ELCNS, "\n")
+cat("Weighted mean log_SQFT:", weighted_mean_log_SQFT, "\n")
+cat("Weighted variance log_SQFT:", weighted_var_log_SQFT, "\n")
+```
+```{r}
+# Custom function to calculate weighted correlation
+weighted_corr <- function(x, y, weights) {
+  # Calculate weighted means
+  mean_x <- sum(weights * x) / sum(weights)
+  mean_y <- sum(weights * y) / sum(weights)
+  
+  # Calculate weighted covariance
+  cov_xy <- sum(weights * (x - mean_x) * (y - mean_y)) / sum(weights)
+  
+  # Calculate weighted standard deviations
+  sd_x <- sqrt(sum(weights * (x - mean_x)^2) / sum(weights))
+  sd_y <- sqrt(sum(weights * (y - mean_y)^2) / sum(weights))
+  
+  # Return weighted correlation
+  return(cov_xy / (sd_x * sd_y))
+}
+
+# Applying the custom function to your data
+weighted_correlation <- weighted_corr(transformed_data$log_ELCNS, 
+                                       transformed_data$log_SQFT, 
+                                       transformed_data$FINALWT)
+print(weighted_correlation)
+```
+
+```{r}
+# Scatter plot of log_ELCNS vs log_SQFT with points sized by weights
+ggplot(transformed_data, aes(x = log_SQFT, y = log_ELCNS, size = FINALWT)) +
+  geom_point(alpha = 0.6) +  # Adding transparency for better visibility
+  theme_minimal() +  # Clean theme
+  labs(
+    title = "Weighted Scatter Plot of log_ELCNS vs log_SQFT",
+    x = "log(SQFT) - Building Size",
+    y = "log(ELCNS) - Electricity Consumption",
+    size = "Weight (FINALWT)"
+  ) +
+  scale_size_continuous(range = c(1, 6))  # Adjust point size range
+
+```
+
+```{r}
+# Unweighted mean and variance for log_ELCNS
+unweighted_mean_log_ELCNS <- mean(transformed_data$log_ELCNS, na.rm = TRUE)
+unweighted_variance_log_ELCNS <- var(transformed_data$log_ELCNS, na.rm = TRUE)
+
+# Unweighted mean and median for log_SQFT
+unweighted_mean_log_SQFT <- mean(transformed_data$log_SQFT, na.rm = TRUE)
+unweighted_variance_log_SQFT <- var(transformed_data$log_SQFT, na.rm = TRUE)
+
+# Print results
+cat("Unweighted mean log_ELCNS:", unweighted_mean_log_ELCNS, "\n")
+cat("Unweighted variance log_ELCNS:", unweighted_variance_log_ELCNS, "\n")
+cat("Unweighted mean log_SQFT:", unweighted_mean_log_SQFT, "\n")
+cat("Unweighted variance log_SQFT:", unweighted_variance_log_SQFT, "\n")
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+weight_correlation <- data.frame(
+  Variable = c("Unweighted (log(ELCNS))", "Weighted (log(ELCNS))", ""),
+  Mean = c(13.17, 10.99, ""),
+  Variance = c(4.43, 2.57, ""),
+  Weighted_correlation = c("", "", 0.61)
+)
+
+knitr::kable( weight_correlation[1:3, 1:4], digits = 3,
+              booktabs = TRUE, format = 'latex',
+              position = "h!", caption = "Weighted Correlation") %>%
+  kableExtra::kable_styling( position = "center") %>%
+  column_spec(1, "2in") %>%
+  column_spec(2, "1in") %>%
+  column_spec(3, "1in")
+```
+
+```{r}
+
+g6 = extracted_data |> ggplot(aes(x = REGION)) +
+  geom_bar(color = '#f8c471', fill = '#73c6b6') + 
+  #scale_color_grey()+scale_fill_grey() +
+  labs(title = "Barplot of REGION") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+g7 = extracted_data |> ggplot(aes(x = CENDIV)) +
+  geom_bar(color = '#f8c471', fill = '#73c6b6') + 
+  #scale_color_grey()+scale_fill_grey() +
+  labs(title = "Barplot of CENDIV") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+grid.arrange(g6,g7,ncol=2)
+
+```
+
+```{r}
+mean_value <- mean(extracted_data$ELCNS, na.rm = TRUE)
+median_value <- median(extracted_data$ELCNS, na.rm = TRUE)
+cat("Mean:", mean_value, "\nMedian:", median_value)
+```
+
+```{r}
+# Load required libraries
+library(knitr)
+
+two_way_table <- table(extracted_data$REGION, extracted_data$CENDIV)
+# Convert the two-way table to a data frame for better visualization
+two_way_table_df <- as.data.frame.matrix(two_way_table)
+
+# Print the table using kable with added styling for better contrast
+kable(two_way_table_df, caption = "Two-way table between REGION and CENDIV") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  row_spec(0, bold = TRUE, color = "black", background = "lightgray")  # Header row styling
+
+```
+
+
+```{r}
+# Perform Chi-Square test for association between PBA and NFLOOR
+chi_square_test <- chisq.test(two_way_table, simulate.p.value = TRUE)
+
+# Print the results of the Chi-Square test
+print(chi_square_test)
+```
+
+```{r}
+# Q-Q plot to check for normality and outliers
+qqnorm(extracted_data$ELCNS)
+qqline(extracted_data$ELCNS, col = "red")
+
+```
+
+```{r, fig.width=4, fig.height=3}
+# Calculate mean and median
+mean_value <- mean(extracted_data$ELCNS_scaled, na.rm = TRUE)
+median_value <- median(extracted_data$ELCNS_scaled, na.rm = TRUE)
+median_value
+
+class(extracted_data$ELCNS_scaled)
+
+
+# Boxplot with mean and median displayed as text
+ggplot(extracted_data, aes(x = "", y = ELCNS_scaled)) +
+  geom_boxplot() + 
+    coord_cartesian(ylim = c(0, 10)) +
+  
+  # Add mean point
+  stat_summary(fun = mean, geom = "point", shape = 2, color = "red", size = 3, 
+               show.legend = TRUE) +
+  
+  # Add median point
+  stat_summary(fun = median, geom = "point", shape = 18, color = "blue", size = 3, 
+               show.legend = TRUE) +
+  
+  # Annotate mean value above the point
+  annotate("text", x = 1.1, y = mean_value + 1, label = paste("Mean:", round(mean_value, 0)), 
+           color = "red", size = 3, hjust = 0) +
+  
+  # Annotate median value below the point
+  annotate("text", x = 1.1, y = median_value + 1, label = paste("Median:", round(median_value, 0)), 
+           color = "blue", size = 3, hjust = 0) +
+  
+  # Adjust title and axis label sizes
+  ggtitle("Boxplot of ELCNS with Mean and Median") +
+  ylab("ELCNS (Electricity Consumption)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10),  # Smaller title
+    axis.title.y = element_text(size = 8),  # Smaller y-axis label
+    axis.text = element_text(size = 7)      # Smaller tick labels
+  )
+```
+
+```{r}
+# Regression Analysis
+predictors_list = c("CENDIV", "SQFT") 
+
+run_gamma_regression <- function(var) {
+  formula <- as.formula(paste("log(ELCNS) ~", var))
+  
+model <- tryCatch({
+  glm(formula, data = data, family = Gamma(link = "log"))
+}, error = function(e) {
+  message("Error in fitting model for ", var, ": ", e$message) 
+  return(NULL)
+})
+
+if (!is.null(model)) {
+  tidy_results <- tidy(model) %>% mutate(variable = var) 
+  aic_value <- AIC(model)
+  return(list(tidy_results = tidy_results, aic = aic_value))
+} else { 
+  return(NULL)
+} 
+}
+
+```
+
+```{r}
+#read data
+
+data <- transformed_data
+```
+
+```{r}
+head(data)
+```
+
+# Check each predictors
+```{r}
+#List of the predictors
+
+predictors_list = c("CENDIV", "SQFT") 
+```
+
+```{r}
+#Function run regression on all the variables
+run_gamma_regression <- function(var) {
+  formula <- as.formula(paste("log(ELCNS) ~", var))
+  
+model <- tryCatch({
+  glm(formula, data = data, family = Gamma(link = "log"))
+}, error = function(e) {
+  message("Error in fitting model for ", var, ": ", e$message) 
+  return(NULL)
+})
+
+if (!is.null(model)) {
+  tidy_results <- tidy(model) %>% mutate(variable = var) 
+  aic_value <- AIC(model)
+  return(list(tidy_results = tidy_results, aic = aic_value))
+} else { 
+  return(NULL)
+} 
+}
+```
+
+
+```{r}
+# Run regressions for all variables
+results_glm_p1i <- lapply(predictors_list, run_gamma_regression) 
+
+# Combine tidy results into a single dataframe
+all_results_p1i <- do.call(rbind, lapply(results_glm_p1i, function(x) x$tidy_results)) 
+
+# Extract AIC values
+aic_values <- sapply(results_glm_p1i, function(x) x$aic) 
+
+# Create a dataframe with variables and their aIC values
+aic_df <- data.frame(variable = predictors_list, aic = aic_values)
+
+# Combine the filtered results with BIC values
+filtered_results <- all_results_p1i %>% 
+  dplyr::select(variable, p.value, term) %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(p.value = round(p.value, 5)) %>% 
+  left_join(aic_df, by = "variable")
+```
+
+
+```{r}
+print(filtered_results[order(filtered_results$aic, decreasing = FALSE), ])
+```
+
+# AUTO GLM
+
+```{r}
+auto_run_glm <- function(data, response_var, list_variable, list_link_function) {
+  library(broom)
+  
+  results <- data.frame()
+  
+  for (var in list_variable) {
+    for (link in list_link_function) {
+      formula <- as.formula(paste(response_var, "~", var))
+      
+      model <- tryCatch({
+        glm(formula, family = Gamma(link = link), data = data)
+      }, error = function(e) {
+        return(NULL)
+      })
+      
+      if (!is.null(model)) {
+        model_summary <- summary(model)
+        coef_table <- tidy(model)
+        
+        for (i in 1:nrow(coef_table)) {
+          results <- rbind(results, data.frame(
+            Variable = var,
+            Link = link,
+            Parameter = coef_table$term[i],
+            Estimate = coef_table$estimate[i],
+            P_value = round(coef_table$p.value[i],4),
+            AIC = model$aic
+          ))
+        }
+      }
+    }
+  }
+  
+  return(results)
+}
+
+```
+```{r}
+list_variable <- c("SQFT", "CENDIV")
+list_link_function <- c("log", "inverse", "identity")
+result_table <- auto_run_glm(data, "ELCNS", list_variable, list_link_function)
+print(result_table)
+```
+```{r}
+result_table[order(result_table$AIC), ]
+```
+
+
+
+## AUTO glm with log(ELCNS)
+
+```{r}
+list_variable_log <- c("log(SQFT)", "CENDIV", "REGION")
+list_link_function <- c("log", "inverse", "identity")
+result_table_log <- auto_run_glm(data, "log(ELCNS)", list_variable_log, list_link_function)
+print(result_table_log)
+```
+```{r}
+result_table_log[order(result_table_log$AIC), ]
+```
+
+Conclusion:
+
+Single glm model with log(ELCNS) ~ log(SQFT) with log link has the lowest AIC. Therefore we will use it as baseline model.
+
+# survey design model
+
+```{r}
+svy_design <- svydesign(ids = ~CENDIV, data = data, weights = ~FINALWT)
+```
+
+```{r}
+svyglm(log(ELCNS) ~ log(SQFT), design = svy_design)
+```
+```{r}
+svyglm(log(ELCNS) ~ CENDIV, design = svy_design)
+```
+```{r}
+svyglm(ELCNS ~ CENDIV, design = svy_design)
+```
+
+```{r}
+svyglm(log(ELCNS) ~ REGION, design = svy_design)
+```
+
+
+```{r}
+m1_svg <- svyglm(log(ELCNS) ~ log(SQFT) + CENDIV, design = svy_design)
+```
+```{r}
+m1_svg
+```
+
+```{r}
+svyglm(log(ELCNS) ~ log(SQFT) + REGION, design = svy_design)
+```
+
+
+
+# Forward model selection
+
+```{r}
+m1_sqft_cendiv <- glm(log(ELCNS) ~ log(SQFT) + CENDIV, family = Gamma(link = "log"), data=data)
+```
+```{r}
+m1_sqft_region <- glm(log(ELCNS) ~ log(SQFT) + REGION, family = Gamma(link = "log"), data=data)
+```
+
+```{r}
+m1_sqft_cendiv
+```
+
+```{r}
+m1_sqft_region
+```
+
+```{r}
+Anova(m1_sqft_region)
+```
+```{r}
+Anova(m1_sqft_cendiv)
+```
+
+# Final model 
+
+```{r}
+final_model <- glm(log(ELCNS) ~ log(SQFT) + CENDIV, family = Gamma(link = "log"), data = data)
+```
+```{r}
+final_model
+```
+
+
+# Models diagnostic
+
+```{r}
+scaled.deviance <- final_model$deviance / summary(final_model)$dispersion 
+scaled.deviance
+```
+
+Scaled deviance = 6788.7119 at 6435 d.f
+
+```{r}
+resdev_final_model<- residuals(final_model, type = "deviance")
+```
+
+```{r}
+library(patchwork)
+```
+
+```{r}
+par(mfrow = c(2,2))
+plot(final_model)
+```
+
+```{r}
+library(gridExtra)
+```
+
+```{r}
+res_final_model <- simulateResiduals(fittedModel = final_model) 
+q_final_model <- residuals(res_final_model, quantileFunction = qnorm)
+p1_f <- ggplot(tibble(q = q_final_model), aes(x = q)) +
+geom_histogram(aes(y = after_stat(density)), bins = 10, fill = "skyblue", color = "black")+ geom_density(color = "red") +
+labs(title = "Histogram of Simulated Residuals", x = "Residuals", y = "Density")
+
+p2_f <- ggplot(tibble(q = q_final_model), aes(sample = q)) +
+  geom_qq() +
+  geom_qq_line(color = "red") +
+  labs(title = "Q-Q Plot of Simulated Residuals", x = "Theoretical Quantiles", y = "Sample")
+
+grid.arrange(p1_f, p2_f, ncol = 2)
+```
+
+
+# Plotting models
+```{r}
+baseline_model <-  glm(log(ELCNS) ~ log(SQFT), family = Gamma(link = "log"), data=data)
+```
+
+
+```{r}
+# Load required libraries
+library(ggplot2)
+
+# Assuming 'data' is your dataset and models are already fitted
+
+# Generate predictions
+data$predicted_best <- predict(final_model, newdata = data, type = "response")
+data$predicted_baseline <- predict(baseline_model, newdata = data, type = "response")
+
+# Create a long format dataset for plotting
+plot_data <- tidyr::pivot_longer(data, 
+                                 cols = c(ELCNS, predicted_best, predicted_baseline),
+                                 names_to = "model", 
+                                 values_to = "value")
+
+
+```
+
+```{r}
+plot_data
+
+```
+## Comparison models without S.E
+
+```{r}
+# Create the plot
+ggplot(data, aes(x = log(SQFT), y = log(ELCNS))) +
+  # Add actual data points
+  geom_point(alpha = 0.2, colour = "black") +
+  # Add line for best model
+  geom_line(aes(y = predicted_best, colour = "Best Model"), size = 1.5) +
+  # Add line for baseline model
+  geom_line(aes(y = predicted_baseline, colour = "Baseline Model"), size = 1) +
+  # Customize colors and labels
+  #scale_color_manual(values = c("Best Model" = "orange", "Baseline Model" = "green"),
+                     #name = "Model") +
+  # Set labels and title
+  labs(title = "Model Performance Comparison",
+       x = "log Square Footage (SQFT)",
+       y = "log Electricity Consumption (ELCNS)") +
+  # Customize theme
+  scale_color_discrete(name = "fitted values")+
+  theme_minimal() +
+  theme(legend.position = "bottom")
+  ggsave("model_performance_comparison.png", width = 10, height = 6, dpi = 300)
+```
+
+
+## Comparison models with Standard Error
+
+```{r}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+
+# Assuming 'data' is your original dataset and models are already fitted
+
+# Create new_data with only ELCNS and SQFT
+new_data <- data[, c("ELCNS", "SQFT")]
+
+# Function to calculate prediction intervals
+get_pred_int <- function(model, newdata, level = 0.95) {
+  preds <- predict(model, newdata, se.fit = TRUE)
+  crit <- qt((1 + level) / 2, df = df.residual(model))
+  upr <- exp(preds$fit + crit * preds$se.fit)
+  lwr <- exp(preds$fit - crit * preds$se.fit)
+  fit <- exp(preds$fit)
+  return(data.frame(fit = fit, upr = upr, lwr = lwr))
+}
+
+# Calculate prediction intervals
+best_pred <- get_pred_int(final_model, data)
+baseline_pred <- get_pred_int(baseline_model, data)
+
+# Add predictions and intervals to the new_data
+new_data <- new_data %>%
+  mutate(
+    best_fit = best_pred$fit,
+    best_upr = best_pred$upr,
+    best_lwr = best_pred$lwr,
+    baseline_fit = baseline_pred$fit,
+    baseline_upr = baseline_pred$upr,
+    baseline_lwr = baseline_pred$lwr
+  )
+
+# Create the plot
+ggplot(new_data, aes(x = log(SQFT))) +
+  # Add actual data points
+  geom_point(aes(y = log(ELCNS)), alpha = 0.2, colour = "black") +
+  # Add line and ribbon for best model
+  geom_line(aes(y = best_fit, colour = "Best Model"), size = 1.2) +
+  geom_ribbon(aes(ymin = best_lwr, ymax = best_upr, fill = "Best Model"), alpha = 0.2) +
+  # Add line and ribbon for baseline model
+  geom_line(aes(y = baseline_fit, colour = "Baseline Model"), size = 1) +
+  geom_ribbon(aes(ymin = baseline_lwr, ymax = baseline_upr, fill = "Baseline Model"), alpha = 0.2) +
+  # Set labels and title
+  labs(title = "Model Performance Comparison with Standard Errors",
+       x = "log Square Footage (SQFT)",
+       y = "log Electricity Consumption (ELCNS)") +
+  # Customize theme and colors
+  scale_color_manual(values = c("Best Model" = "cadetblue", "Baseline Model" = "coral"), name = "Fitted") +
+  scale_fill_manual(values = c("Best Model" = "cadetblue", "Baseline Model" = "coral"), name = "Fitted") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Save the plot (optional)
+# ggsave("model_performance_comparison_with_se.png", width = 10, height = 6, dpi = 300)
+```
+
+
