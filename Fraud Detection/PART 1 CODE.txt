@@ -1,0 +1,48 @@
+// PART 1 CODE
+
+// Ensure uniqueness of clients based on their ID
+CREATE CONSTRAINT client_id_unique FOR (c:Client) REQUIRE c.id IS UNIQUE;
+
+// Ensure uniqueness of sellers based on their ID
+CREATE CONSTRAINT seller_id_unique FOR (s:Seller) REQUIRE s.id IS UNIQUE;
+
+// Ensure uniqueness of transactions based on their ID
+CREATE CONSTRAINT transaction_id_unique FOR (t:Transaction) REQUIRE t.id IS UNIQUE;
+
+// Indexes to optimize the queries with custom names
+CREATE INDEX client_name_index FOR (c:Client) ON (c.name);
+CREATE INDEX seller_name_index FOR (s:Seller) ON (s.name);
+CREATE INDEX transaction_time_index FOR (t:Transaction) ON (t.time);
+CREATE INDEX transaction_amount_index FOR (t:Transaction) ON (t.amount);
+
+// LOADING CSV 
+// Load Client data and create relationships with Phone, Email, TFN
+LOAD CSV WITH HEADERS FROM 'file:///clients.csv' AS row
+MERGE (c:Client {id: row.id, name: row.name})
+MERGE (p:Phone {number: row.phone})
+MERGE (e:Email {address: row.email})
+MERGE (t:TFN {number: row.tfn})
+MERGE (c)-[:HAS_PHONE]->(p)
+MERGE (c)-[:HAS_EMAIL]->(e)
+MERGE (c)-[:HAS_TFN]->(t);
+
+// Load Store data and create Seller nodes
+LOAD CSV WITH HEADERS FROM 'file:///stores.csv' AS row
+MERGE (s:Seller {id: row.id, name: row.name});
+
+LOAD CSV WITH HEADERS FROM 'file:///purchase.csv' AS row
+MATCH (c:Client {id: row.idFrom}), (s:Seller {id: row.idTo})
+CREATE (c)-[:PERFORMED]->(p:Purchase:Transaction {
+    amount: toFloat(row.amount), 
+    time: datetime("2024-05-12T00:00:00").epochMillis + toInteger(row.timeOffset) * 1000
+})
+CREATE (p)-[:TO]->(s);
+LOAD CSV WITH HEADERS FROM 'file:///xfer.csv' AS row
+MATCH (c1:Client {id: row.idFrom}), (c2:Client {id: row.idTo})
+CREATE (c1)-[:PERFORMED]->(t:Transfer:Transaction {
+    amount: toFloat(row.amount), 
+    time: datetime("2024-05-12T00:00:00").epochMillis + toInteger(row.timeOffset) * 1000
+})
+CREATE (t)-[:TO]->(c2);
+
+CALL db.schema.visualization
