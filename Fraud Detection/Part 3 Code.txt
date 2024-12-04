@@ -1,0 +1,155 @@
+// Part 3 
+
+// A)
+
+// i)
+// creating projection to analysis client who share info
+ CALL gds.graph.project(
+  'client_shared_info_projection',
+  ['Client', 'Email', 'Phone', 'TFN'], // Node labels
+  {
+    HAS_EMAIL: {type: 'HAS_EMAIL', orientation: 'UNDIRECTED'},
+    HAS_PHONE: {type: 'HAS_PHONE', orientation: 'UNDIRECTED'},
+    HAS_TFN: {type: 'HAS_TFN', orientation: 'UNDIRECTED'}
+  }
+);
+
+// WCC finds clusters of nodes in a graph where there is a path between any two nodes
+CALL gds.wcc.stream('client_shared_info_projection')
+YIELD componentId, nodeId
+WITH gds.util.asNode(nodeId) AS node, componentId
+WHERE node:Client
+RETURN componentId, collect(node.name) AS clients
+ORDER BY size(clients) DESC;
+
+
+// ii)
+
+// identifying larger groups 
+CALL gds.wcc.stream('client_shared_info_projection')
+YIELD componentId, nodeId
+WITH componentId, gds.util.asNode(nodeId) AS node
+WHERE node:Client
+WITH componentId, collect(node.name) AS clients
+WHERE size(clients) >= 5
+RETURN componentId AS groupId,
+       size(clients) AS groupSize,clients  AS clientNames
+ORDER BY groupSize DESC;
+
+
+// iii)
+
+// assigning a groupId to each Client node based on the component they belong to. 
+CALL gds.wcc.stream('client_shared_info_projection')
+YIELD componentId, nodeId
+WITH componentId, gds.util.asNode(nodeId) AS node
+WHERE node:Client
+SET node.groupId = componentId;
+
+// visualisation for each largest group size
+MATCH (c:Client)-[r]->(shared)
+WHERE c.groupId = 4103
+  AND NOT type(r) IN ['FIRST_TX', 'PERFORMED', 'LAST_TX']
+RETURN c, r, shared;
+
+MATCH (c:Client)-[r]->(shared)
+WHERE c.groupId = 4104
+  AND NOT type(r) IN ['FIRST_TX', 'PERFORMED', 'LAST_TX']
+RETURN c, r, shared;
+
+MATCH (c:Client)-[r]->(shared)
+WHERE c.groupId = 4114
+  AND NOT type(r) IN ['FIRST_TX', 'PERFORMED', 'LAST_TX']
+RETURN c, r, shared;
+
+
+// Part B
+
+// i) 
+
+MATCH (c:Client)
+WHERE c.groupId IS NOT NULL
+WITH c.groupId AS groupId, collect(c) AS clients, count(c) AS groupSize
+WHERE groupSize > 5
+UNWIND clients AS groupMember
+MATCH (groupMember)-[:PERFORMED]->(t:Transaction)-[:TO]->(outside:Client)
+WHERE outside.groupId IS NULL OR outside.groupId <> groupMember.groupId
+RETURN groupMember.name AS fromGroupMember, 
+       t.amount AS transactionAmount, 
+       outside.name AS toOutsideAccount, 
+       t.transactionDatetime AS transactionTime
+ORDER BY transactionAmount DESC;
+
+
+/ii)
+
+// Step 1: Find clients in large fraud groups (more than 5 members)
+MATCH (c:Client)
+WHERE c.groupId IS NOT NULL
+WITH c.groupId AS groupId, collect(c) AS clients, count(c) AS groupSize
+WHERE groupSize > 5
+UNWIND clients AS groupMember
+
+// Step 2: Find transactions from group members to clients outside their group
+MATCH (groupMember)-[:PERFORMED]->(t:Transaction)-[:TO]->(outside:Client)
+WHERE outside.groupId IS NULL OR outside.groupId <> groupMember.groupId
+
+// Step 3: Return the relevant nodes and relationships for GDS projection
+RETURN groupMember, outside, t; 
+
+// step 4: creating a projectionof members that have transactions outside
+CALL gds.graph.project(
+  'fraud_movement_projection',
+  ['Client', 'Transaction'],  // Include both Client and Transaction nodes
+  {
+    PERFORMED: {
+      type: 'PERFORMED',
+      orientation: 'UNDIRECTED'  // Use UNDIRECTED for connected groups
+    },
+    TO: {
+      type: 'TO',  // Include TO relationships between Transactions and Clients
+      orientation: 'UNDIRECTED'
+    }
+  }
+)
+YIELD graphName, nodeCount, relationshipCount;
+
+// step 5 :Louvain algorithm, which detects communities in large graphs based on modularity. This means evaluating how much more densely connected the nodes within a community are.
+ 
+CALL gds.louvain.stream('fraud_movement_projection')
+YIELD nodeId, communityId
+WITH gds.util.asNode(nodeId) AS client, communityId
+RETURN communityId, 
+       size(collect(DISTINCT client.name)) AS groupSize,  // Collect distinct names
+       collect(DISTINCT client.name) AS clientNames
+ORDER BY groupSize DESC
+
+// iii)
+// ensuring that the communityId is written back to the actual Client nodes in the database.
+
+CALL gds.louvain.stream('fraud_movement_projection')
+YIELD nodeId, communityId
+WITH gds.util.asNode(nodeId) AS client, communityId
+SET client.communityId = communityId
+RETURN client.name, client.communityId
+LIMIT 10;
+
+// using algorithms like pageRank to identify key players in the network.
+CALL gds.pageRank.stream('fraud_movement_projection')
+YIELD nodeId, score
+WITH gds.util.asNode(nodeId) AS client, score
+WHERE client.communityId = 375  
+SET client.pageRank = score 
+RETURN client.name AS clientName, client.pageRank AS score
+ORDER BY score DESC
+LIMIT 10
+
+//iv)
+//visualisation of the community having largest group size and then doing value based styling in neo 4j bloom 
+
+MATCH (c:Client)-[p:PERFORMED]->(t:Transaction)-[r:TO]->(outside:Client)
+WHERE c.communityId = 375
+WITH c, outside, COUNT(t) AS transactionCount
+CALL apoc.create.vRelationship(c, 'PERFORMED_WITH', {count: transactionCount}, outside) YIELD rel
+RETURN c, rel;
+
