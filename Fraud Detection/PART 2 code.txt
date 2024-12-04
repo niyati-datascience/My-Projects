@@ -1,0 +1,84 @@
+## PART 2 
+
+
+// Problem 1 
+MATCH (t:Transaction)
+SET t.transactionDatetime = datetime({epochMillis: t.time});
+
+MATCH (t:Transaction)
+RETURN t.transactionDatetime, t.amount
+ORDER BY t.transactionDatetime
+LIMIT 10;
+
+MATCH (c:Client)-[:PERFORMED]->(p:Purchase)
+WHERE p.transactionDatetime >= datetime("2024-05-12T10:00:00") AND p.transactionDatetime <= datetime("2024-05-12T14:00:00")
+WITH c.name AS name, sum(p.amount) AS totalSpent
+ORDER BY totalSpent DESC
+LIMIT 1
+RETURN name, totalSpent;
+
+
+// Problem 2
+
+MATCH (c:Client)
+OPTIONAL MATCH (c)<-[:TO]-(incoming:Transaction) 
+OPTIONAL MATCH (c)-[:PERFORMED]->(outgoing:Transaction) 
+WITH c.name AS name,
+     sum(CASE WHEN incoming IS NOT NULL THEN incoming.amount ELSE 0 END) AS totalIncoming,
+     sum(CASE WHEN outgoing IS NOT NULL THEN outgoing.amount ELSE 0 END) AS totalOutgoing,
+     max(outgoing.amount) AS big_spend
+WITH name, totalIncoming, totalOutgoing, (totalIncoming - totalOutgoing) AS balance, big_spend
+WHERE balance < 0
+RETURN name, balance, big_spend
+ORDER BY balance ASC
+LIMIT 5;
+
+
+// Problem 3
+
+MATCH (s:Seller {name: 'Woods'})<-[:TO]-(p:Purchase)<-[:PERFORMED]-(c:Client)
+WITH s, c, sum(p.amount) AS total_purchase
+MATCH (c)<-[r:TO]-(t:Transfer)<-[:PERFORMED]-(d:Client)
+WITH c.name AS name, sum(t.amount) AS total_xfer, total_purchase, (total_purchase / sum(t.amount)) * 100 AS percentage
+WHERE percentage >= 5
+RETURN name, percentage, total_xfer, total_purchase;
+
+// Problem 4
+
+// Step1 : Creating NEXT Relationships Between Transactions
+
+ MATCH (c:Client)-[:PERFORMED]->(t:Transaction)
+WITH c, t
+ORDER BY c.id, t.transactionDatetime
+WITH c, collect(t) AS transactions
+UNWIND range(0, size(transactions)-2) AS idx
+WITH transactions[idx] AS t1, transactions[idx+1] AS t2
+CREATE (t1)-[:NEXT]->(t2);
+
+// Step2: Creating FIRST_TX and LAST_TX Relationships
+
+MATCH (c:Client)-[:PERFORMED]->(t:Transaction)
+WITH c, t
+ORDER BY c.id, t.transactionDatetime
+WITH c, collect(t) AS transactions
+WITH c, transactions[0] AS firstTx, transactions[-1] AS lastTx
+CREATE (c)-[:FIRST_TX]->(firstTx)
+CREATE (c)-[:LAST_TX]->(lastTx);
+
+// Step3: Ordering relationship
+
+MATCH (c:Client)-[:LAST_TX]->(lastTx)-[:NEXT]->(firstTx)
+WHERE (c)-[:FIRST_TX]->(firstTx)
+CREATE (lastTx)-[:NEXT]->(firstTx);
+
+// Step 4: Take any example of client name
+
+MATCH (c:Client {name: 'Sebastian Stein'})-[:FIRST_TX]->(firstTx)
+MATCH path = (firstTx)-[:NEXT*]->(lastTx)
+WITH c, path
+OPTIONAL MATCH (c)-[r:PERFORMED]->()
+DELETE r
+RETURN c, 
+       nodes(path) AS transactions, 
+       [rel IN relationships(path) WHERE type(rel) = 'NEXT'] AS nextRelationships;
+
